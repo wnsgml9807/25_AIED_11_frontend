@@ -61,7 +61,10 @@ class SessionManager:
             st.session_state.task_list = []  # 세션 내 전체 task 배열
             
         if "current_agent" not in st.session_state:
-            st.session_state["current_agent"] = "supervisor"  
+            st.session_state["current_agent"] = "supervisor"
+            
+        if "needs_rerun_after_stream" not in st.session_state:
+            st.session_state.needs_rerun_after_stream = False  
 
     @staticmethod
     def reset_session(logger):
@@ -173,7 +176,6 @@ class UI:
             st.divider()
             st.subheader("교과서 업로드")
             pdf_file = st.file_uploader("교과서 업로드", type=["pdf"])  # 파일 선택
-            title_input = st.text_input("교재 이름을 입력하세요")
             
             # 현재 교과서 상태 확인
             has_existing_textbook = False
@@ -194,11 +196,11 @@ class UI:
             button_text = "기존 교과서 덮어쓰기" if has_existing_textbook else "DB 변환"
             button_type = "primary" if has_existing_textbook else "secondary"
             
-            convert_disabled = (pdf_file is None) or (not title_input.strip())
+            convert_disabled = (pdf_file is None)
 
             if st.button(button_text, use_container_width=True, type=button_type, key='pdf_file_save', disabled=convert_disabled):
                 if convert_disabled:
-                    st.warning("📄 PDF 파일과 교재 이름을 모두 입력하세요.")
+                    st.warning("📄 PDF 파일을 업로드하세요.")
                     st.stop()
 
                 try:
@@ -206,7 +208,7 @@ class UI:
                         endpoint = f"{config.backend_url}/data/upload"
 
                         files = {"file": (pdf_file.name, pdf_file.read(), "application/pdf")}
-                        data = {"session_id": st.session_state.session_id, "title": title_input.strip()}
+                        data = {"session_id": st.session_state.session_id, "title": pdf_file.name.strip()}
 
                         response = requests.post(
                             endpoint,
@@ -412,21 +414,23 @@ class TaskUI:
                 changed_rows = df.index[df["완료여부"] != edited_df["완료여부"]].tolist()
                 
                 # 모든 변경사항을 먼저 처리
+                has_changes = False
                 for row_idx in changed_rows:
                     date_val = df.iloc[row_idx]["date"]
                     task_no_val = int(df.iloc[row_idx]["task_no"])
                     new_status = bool(edited_df.iloc[row_idx]["완료여부"])
 
-                    TaskUI.update_task_status(date_val, task_no_val, new_status, backend_client)
-
-                    # 로컬 state 업데이트
-                    for t in st.session_state.task_list:
-                        if t.get("date") == date_val and t.get("task_no") == task_no_val:
-                            t["is_completed"] = new_status
-                            break
+                    # 백엔드 업데이트가 성공한 경우에만 로컬 state 업데이트
+                    if TaskUI.update_task_status(date_val, task_no_val, new_status, backend_client):
+                        # 로컬 state 업데이트
+                        for t in st.session_state.task_list:
+                            if t.get("date") == date_val and t.get("task_no") == task_no_val:
+                                t["is_completed"] = new_status
+                                has_changes = True
+                                break
                 
-                # 모든 변경사항 처리 후 한 번만 rerun
-                if changed_rows:
+                # 변경사항이 있으면 UI 업데이트를 위해 rerun
+                if has_changes:
                     st.rerun()
 
     @staticmethod
@@ -444,9 +448,15 @@ class TaskUI:
             )
             if response.status_code != 200:
                 st.error(f"업데이트 실패: {response.text}")
+                return False
+            return True
+            
         except Exception as e:
             st.error(f"업데이트 중 오류: {e}")
+            return False
 
+
+        
 # Message Handling (기존 placeholder 기반 렌더링 복원)
 class MessageRenderer:
     """Handles message rendering and task list updates"""
@@ -506,12 +516,12 @@ class MessageRenderer:
                 item_content = item.get("content", "")
                 
                 if item_type == "text":
-                    if current_idx < len(placeholders):
-                        with placeholders[current_idx].container(border=False):
+                        if current_idx < len(placeholders):
+                            with placeholders[current_idx].container(border=False):
+                                st.markdown(item_content)
+                        else:
                             st.markdown(item_content)
-                    else:
-                        st.markdown(item_content)
-                    current_idx += 1
+                        current_idx += 1
                     
                 elif item_type == "task_update":
                     self._handle_task_update(item_content)
@@ -552,11 +562,12 @@ class MessageRenderer:
                 task_data = json.loads(task_data)
 
             # task_data 는 전체 task 배열 (List[dict])
-            # 위젯을 직접 다시 그리지 않고, 상태만 업데이트한 뒤 rerun을 호출하여
-            # 다음 실행 주기에서 그리도록 하여 key 중복을 방지합니다.
+            # 메시지 렌더링 중에는 바로 rerun하지 않고 상태만 업데이트
             if st.session_state.get("task_list") != task_data:
                 st.session_state.task_list = task_data
-                st.rerun()
+                # 스트리밍 중이 아닐 때만 즉시 rerun
+                if not st.session_state.get("is_streaming", False):
+                    st.rerun()
 
         except Exception as e:
             self.logger.error(f"Task update error: {e}")
@@ -604,7 +615,7 @@ class BackendClient:
         current_idx = 0
         text_buffer = ""
         text_placeholder = None
-
+        logger = logging.getLogger(__name__)
         try:
             self.response_status.update(label="AI 응답 중...", state="running")
 
@@ -625,6 +636,7 @@ class BackendClient:
                                 text_placeholder = placeholders[current_idx].empty()
                             text_placeholder.markdown(text_buffer)
                             message_data["messages"].append({"type": "text", "content": text_buffer})
+                            logger.info(f"session_id: {st.session_state.session_id}, assistant response: \n{text_buffer}")
                             current_idx += 1
                             text_buffer = ""
                             text_placeholder = None
@@ -641,6 +653,7 @@ class BackendClient:
                                 text_placeholder = placeholders[current_idx].empty()
                             text_placeholder.markdown(text_buffer)
                             message_data["messages"].append({"type": "text", "content": text_buffer})
+                            logger.info(f"session_id: {st.session_state.session_id}, assistant response: \n{text_buffer}")
                             current_idx += 1
                             text_buffer = ""
                             text_placeholder = None
@@ -669,6 +682,7 @@ class BackendClient:
                                 text_placeholder = placeholders[current_idx].empty()
                             text_placeholder.markdown(text_buffer)
                             message_data["messages"].append({"type": "text", "content": text_buffer})
+                            logger.info(f"session_id: {st.session_state.session_id}, assistant response: \n{text_buffer}")
                             current_idx += 1
                             text_buffer = ""
                             text_placeholder = None
@@ -683,6 +697,7 @@ class BackendClient:
                                 text_placeholder = placeholders[current_idx].empty()
                             text_placeholder.markdown(text_buffer)
                             message_data["messages"].append({"type": "text", "content": text_buffer})
+                            logger.info(f"session_id: {st.session_state.session_id}, assistant response: \n{text_buffer}")
                             current_idx += 1
                             text_buffer = ""
                             text_placeholder = None
@@ -691,8 +706,8 @@ class BackendClient:
                         friendly_tool_name = self._get_friendly_tool_name(tool_name)
 
                         if current_idx < len(placeholders):
-                            with placeholders[current_idx].status(f"{friendly_tool_name}", state="running", expanded=False):
-                                st.markdown(text)
+                            with placeholders[current_idx]:
+                                st.status(f"{friendly_tool_name}", state="complete", expanded=False)
                         else:
                             st.warning(f"도구 표시 오류: {friendly_tool_name}")
 
@@ -717,7 +732,7 @@ class BackendClient:
         if tool_name == "get_textbook_content":
             return "교재 내용 조회"
         elif tool_name == "update_task_list":
-            return "할 일 목록 업데이트"
+            return "Task 목록 업데이트"
         return tool_name
     
     def _handle_task_update_from_stream(self, task_data):
@@ -726,11 +741,12 @@ class BackendClient:
             if isinstance(task_data, str):
                 task_data = json.loads(task_data)
             
-            # 위젯을 직접 다시 그리지 않고, 상태만 업데이트한 뒤 rerun을 호출하여
-            # 다음 실행 주기에서 그리도록 하여 key 중복을 방지합니다.
+            # 스트리밍 중에는 rerun을 호출하지 않고 상태만 업데이트
+            # rerun은 스트리밍이 완료된 후에 수행
             if st.session_state.get("task_list") != task_data:
                 st.session_state.task_list = task_data
-                st.rerun()
+                # 스트리밍 완료 후 rerun이 필요함을 표시
+                st.session_state.needs_rerun_after_stream = True
             
         except Exception as e:
             self.logger.error(f"Task update from stream error: {e}")
@@ -798,7 +814,7 @@ def show_main_app(config, logger):
     # Process prompt
     if prompt:
         st.session_state.is_streaming = True
-        
+        logger.info(f"session_id: {st.session_state.session_id}, user prompt: \n{prompt}")
         # Add user message
         SessionManager.add_message("user", prompt)
         message_renderer.render_message({"role": "user", "content": prompt}, viewport_height)
@@ -808,6 +824,11 @@ def show_main_app(config, logger):
             response = backend_client.send_message(prompt, st.session_state.session_id, viewport_height)
             SessionManager.add_message("assistant", response)
             st.session_state.is_streaming = False
+            
+            # 스트리밍 중 task update가 있었다면 이제 rerun
+            if st.session_state.get("needs_rerun_after_stream", False):
+                st.session_state.needs_rerun_after_stream = False
+                st.rerun()
         except Exception as e:
             logger.error(f"백엔드 호출 중 오류 발생: {e}")
             st.error(f"오류가 발생했습니다: {e}")
