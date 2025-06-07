@@ -1,0 +1,8 @@
+streamlit
+requests
+sseclient
+streamlit-extras
+streamlit-screen-stats
+streamlit_local_storage
+streamlit-browser-session-storage
+streamlit-mermaid
