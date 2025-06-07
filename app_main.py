@@ -549,7 +549,9 @@ class MessageRenderer:
             
             # task_data 는 전체 task 배열 (List[dict])
             st.session_state.task_list = task_data
-            TaskUI.render_task_lists(self.task_placeholders, self)
+
+            # 중복 렌더를 피하기 위해 상태만 저장하고 rerun
+            st.rerun()
             
         except Exception as e:
             self.logger.error(f"Task update error: {e}")
@@ -720,7 +722,9 @@ class BackendClient:
                 task_data = json.loads(task_data)
             
             st.session_state.task_list = task_data
-            TaskUI.render_task_lists(self.task_placeholders, self)
+
+            # 중복 렌더를 피하기 위해 상태만 저장하고 rerun
+            st.rerun()
             
         except Exception as e:
             self.logger.error(f"Task update from stream error: {e}")
