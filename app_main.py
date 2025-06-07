@@ -410,6 +410,8 @@ class TaskUI:
 
             if not edited_df.equals(df):
                 changed_rows = df.index[df["완료여부"] != edited_df["완료여부"]].tolist()
+                
+                # 모든 변경사항을 먼저 처리
                 for row_idx in changed_rows:
                     date_val = df.iloc[row_idx]["date"]
                     task_no_val = int(df.iloc[row_idx]["task_no"])
@@ -422,8 +424,10 @@ class TaskUI:
                         if t.get("date") == date_val and t.get("task_no") == task_no_val:
                             t["is_completed"] = new_status
                             break
-
-                st.rerun()
+                
+                # 모든 변경사항 처리 후 한 번만 rerun
+                if changed_rows:
+                    st.rerun()
 
     @staticmethod
     def update_task_status(date, task_no, completed, backend_client):
@@ -546,11 +550,14 @@ class MessageRenderer:
         try:
             if isinstance(task_data, str):
                 task_data = json.loads(task_data)
-            
+
             # task_data 는 전체 task 배열 (List[dict])
-            st.session_state.task_list = task_data
-            TaskUI.render_task_lists(self.task_placeholders, self)
-            
+            # 위젯을 직접 다시 그리지 않고, 상태만 업데이트한 뒤 rerun을 호출하여
+            # 다음 실행 주기에서 그리도록 하여 key 중복을 방지합니다.
+            if st.session_state.get("task_list") != task_data:
+                st.session_state.task_list = task_data
+                st.rerun()
+
         except Exception as e:
             self.logger.error(f"Task update error: {e}")
 
@@ -719,8 +726,11 @@ class BackendClient:
             if isinstance(task_data, str):
                 task_data = json.loads(task_data)
             
-            st.session_state.task_list = task_data
-            TaskUI.render_task_lists(self.task_placeholders, self)
+            # 위젯을 직접 다시 그리지 않고, 상태만 업데이트한 뒤 rerun을 호출하여
+            # 다음 실행 주기에서 그리도록 하여 key 중복을 방지합니다.
+            if st.session_state.get("task_list") != task_data:
+                st.session_state.task_list = task_data
+                st.rerun()
             
         except Exception as e:
             self.logger.error(f"Task update from stream error: {e}")
