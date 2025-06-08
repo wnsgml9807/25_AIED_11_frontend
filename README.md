@@ -1,4 +1,4 @@
-# AI Study Planner
+# MyStudy
 _학생의 교재를 기반으로 상호작용하는 개인 맞춤형 AI 학습 코치_
 
 ```
@@ -15,7 +15,7 @@ _학생의 교재를 기반으로 상호작용하는 개인 맞춤형 AI 학습 
 <!-- <div align="center">
   <h3> 직접 사용해 보세요 ✨</h3>
   <a href="your-streamlit-app-url" target="_blank">
-    <img src="https://img.shields.io/badge/AI_Study_Planner_실행하기-3D85FF?style=for-the-badge&logo=streamlit&logoColor=white" alt="AI Study Planner 실행하기" width="300"/>
+    <img src="https://img.shields.io/badge/AI_Study_Planner_실행하기-3D85FF?style=for-the-badge&logo=streamlit&logoColor=white" alt="MyStudy 실행하기" width="300"/>
   </a>
   <p><i>버튼을 클릭하면 데모 앱 링크로 이동합니다. 🚀</i></p>
 </div> -->
@@ -25,7 +25,7 @@ _학생의 교재를 기반으로 상호작용하는 개인 맞춤형 AI 학습 
 
 ## 1️⃣ 프로젝트 개요
 
-**AI Study Planner**는 사용자가 자신의 학습 교재(PDF)를 업로드하면, AI가 이를 분석하여 개인화된 학습 계획을 자동으로 수립해주는 시스템입니다.
+**MyStudy**는 사용자가 자신의 학습 교재(PDF)를 업로드하면, AI가 이를 분석하여 개인화된 학습 계획을 자동으로 수립해주는 시스템입니다.
 
 이 시스템은 단순히 계획만 생성하는 것이 아니라, AI가 '학습 코치'로서 매일의 학습 과정을 함께 관리합니다. 학생의 진행 상황에 따라 맞춤형 퀴즈를 제공하거나, 학습 완료 후에는 성찰을 유도하여 학습 내용을 점검할 수 있도록 설계했습니다. 모든 상호작용은 LangGraph와 FastAPI를 기반으로 상태를 저장하는 에이전트 구조로 구현되어, 지속적인 학습 관리가 가능합니다.
 
@@ -81,11 +81,7 @@ aied/
 
 ```mermaid
 graph TD
-    %% User Layer
-    subgraph USER_LAYER ["User Layer"]
-        direction LR
-        USER[👤 User / Client Browser]
-    end
+    USER[👤 User / Client Browser]
 
     %% Presentation Layer (Frontend)
     subgraph FRONTEND_LAYER ["Presentation Layer (Frontend)"]
@@ -121,17 +117,12 @@ graph TD
         SQLITE_DB["SQLite (Session State Checkpoints)"]
     end
 
-    %% Infrastructure Layer
-    subgraph INFRA_LAYER ["Infrastructure Layer"]
-        direction LR
-        DOCKER["Docker Container"]
-    end
-
     %% Connections
     USER --> STREAMLIT_UI
     STREAMLIT_UI -- "HTTP/WebSocket (SSE)" --> API_GW
     
     API_GW --> LANGGRAPH_ENGINE
+    API_GW -- "DB embedding" --> PDF_PROCESSOR
     
     LANGGRAPH_ENGINE -- "Workflow Orchestration" --> TEACHER_AGENT
     TEACHER_AGENT -- "Tool Invocation" --> CUSTOM_TOOLS
@@ -141,21 +132,33 @@ graph TD
     
     PDF_PROCESSOR -- "Vectorize & Store" --> CHROMA_DB
     LANGGRAPH_ENGINE -- "State Persistence" --> SQLITE_DB
-    
-    %% Deployment
-    FASTAPI_SERVER -.-> DOCKER
 
     %% Styling
     classDef frontend fill:#9cf,stroke:#333,stroke-width:2px;
     classDef backend fill:#lightgrey,stroke:#333,stroke-width:2px;
     classDef data fill:#9f9,stroke:#333,stroke-width:2px;
     classDef infra fill:#fcf,stroke:#333,stroke-width:2px;
+    classDef red fill:#ffcccc,stroke:#cc0000,stroke-width:2px;
 
     class USER,STREAMLIT_UI frontend;
     class FASTAPI_SERVER,API_GW,LANGGRAPH_ENGINE,TEACHER_AGENT,CUSTOM_TOOLS,PDF_PROCESSOR backend;
     class CHROMA_DB,SQLITE_DB data;
     class DOCKER infra;
+    class TEACHER_AGENT red;
 ```
+
+### 아키텍처 설명
+
+- **User**: 사용자는 브라우저를 통해 시스템과 상호작용합니다.
+- **Presentation Layer (Frontend)**: Streamlit으로 구축된 웹 UI가 사용자 인터페이스를 제공합니다.
+- **Application Layer (Backend)**:
+    - Docker 컨테이너 환경에서 FastAPI 기반의 백엔드 서버가 동작합니다.
+    - **API Gateway**: REST 및 SSE 엔드포인트를 통해 프론트엔드와 통신하며, PDF 파일 업로드 시 임베딩을 위한 `PDF Processor`를 직접 호출합니다.
+    - **LangGraph Engine**: 사용자의 요청을 받아 에이전트 기반의 워크플로우를 오케스트레이션합니다.
+    - **Unified Teacher Agent**: LangGraph의 통제 하에 RAG, 웹 검색 등 필요한 `Backend Tools`를 사용하여 주어진 작업을 수행하는 핵심 에이전트입니다.
+- **Data Layer**:
+    - **ChromaDB**: PDF 문서에서 추출된 벡터 데이터 및 RAG 검색을 위한 임베딩을 저장하는 벡터 스토어입니다.
+    - **SQLite**: LangGraph의 대화 상태를 지속적으로 저장하여 세션 관리 및 복원(Checkpoint)을 지원합니다.
 
 ---
 

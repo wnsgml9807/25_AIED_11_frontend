@@ -14,7 +14,7 @@ from datetime import datetime
 class Config:
     """Application configuration settings"""
     def __init__(self):
-        self.page_title = "Study Planner"
+        self.page_title = "MyStudy"
         self.page_icon = "📚"
         self.layout = "wide"
         self.sidebar_state = "collapsed"
@@ -261,7 +261,7 @@ class UI:
         # Main info
         
         with st.sidebar:
-            st.title("Study Planner")
+            st.title("MyStudy")
             st.write(f"version {config.version}")
             
             st.info(
@@ -316,11 +316,15 @@ class UI:
             # Task list가 있으면 표시, 없으면 환영 메시지
             if not st.session_state.task_list:
                 with st.container(border=True, height=viewport_height): 
-                    st.info("아직 학습 계획이 없습니다.")
-                    st.markdown("**오른쪽 채팅창에서 다음과 같이 요청해보세요:**")
-                    st.markdown("- '수능특강 1단원부터 3단원까지 1주일 계획 짜줘'")
-                    st.markdown("- '오늘부터 5일동안 매일 20페이지씩 공부 계획 만들어줘'")
-                    st.markdown("- '현재 진도 상황 알려줘'")
+                    pad1, main_container, pad2 = st.columns([1, 5, 1])
+                    with main_container:
+                        st.title("📚 MyStudy")
+                        st.write(" *AI 학습 코치 시스템*")
+                        st.info("설정에서 교재를 먼저 업로드하세요.", icon="💡")
+                        st.markdown("**오른쪽 채팅창에서 다음과 같이 요청해보세요:**")
+                        st.markdown("- '교재 1단원부터 3단원까지 1주일 공부 계획 짜줘'")
+                        st.markdown("- '오늘부터 5일동안 매일 20페이지씩 공부 계획 만들어줘'")
+                        st.markdown("- '현재 진도 상황 알려줘'") 
                 task_placeholders = []
             else:
                 # 실제 task list 표시용 컨테이너
@@ -418,14 +422,13 @@ class TaskUI:
         for task in tasks_list:
             page_range = f"{task.get('start_pg', '')}-{task.get('end_pg', '')}"
             
-            # 썸네일 URL 생성 (첫 페이지)
-            start_pg = task.get('start_pg', 1)
-            thumbnail_url = f"{backend_client.backend_url}/data/textbook/{st.session_state.session_id}/thumbnail/{start_pg}"
+            # Base64 인코딩된 썸네일 데이터 사용
+            thumbnail_data = task.get("thumbnail_base64")
             
             df_data.append({
                 "No": task.get("task_no", ""),
                 "페이지범위": page_range,
-                "미리보기": thumbnail_url,
+                "미리보기": thumbnail_data,
                 #"제목": task.get("title", ""),
                 "요약": task.get("summary", ""),
                 "완료여부": task.get("is_completed", False),
@@ -920,7 +923,7 @@ class BackendClient:
 
 # Main Application Page Logic
 def show_main_app(config, logger):
-    """Displays the main study planner interface"""
+    """Displays the main MyStudy interface"""   
        
     def on_submit():
         """채팅 입력 제출 시 호출되는 콜백 함수"""
@@ -994,7 +997,7 @@ def main():
     UI.create_sidebar(config, logger)
 
     pages = [
-        Page(lambda: show_main_app(config, logger), title="Study Planner", icon="📚", default=True),
+        Page(lambda: show_main_app(config, logger), title="MyStudy", icon="📚", default=True),
     ]
 
     pg = st.navigation(pages)
