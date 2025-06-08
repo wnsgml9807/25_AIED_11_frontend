@@ -60,11 +60,17 @@ class SessionManager:
         if "task_list" not in st.session_state:
             st.session_state.task_list = []  # 세션 내 전체 task 배열
             
+        if "feedback_list" not in st.session_state:
+            st.session_state.feedback_list = []  # 세션 내 전체 feedback 배열
+            
         if "current_agent" not in st.session_state:
             st.session_state["current_agent"] = "supervisor"
             
         if "needs_rerun_after_stream" not in st.session_state:
-            st.session_state.needs_rerun_after_stream = False  
+            st.session_state.needs_rerun_after_stream = False
+            
+        if "pending_message" not in st.session_state:
+            st.session_state.pending_message = None  
 
     @staticmethod
     def reset_session(logger):
@@ -84,6 +90,7 @@ class SessionManager:
         st.session_state.messages = []
         st.session_state.is_streaming = False
         st.session_state.task_list = []
+        st.session_state.feedback_list = []
         
         st.toast("세션이 초기화되었습니다.", icon="🔄")
         st.rerun()
@@ -358,20 +365,68 @@ class TaskUI:
         grouped = TaskUI._group_tasks_by_date(st.session_state.task_list)
 
         sorted_dates = sorted(grouped.keys())
+        all_tasks_completed = True
+        all_feedbacks_completed = True
+        
+        # 각 날짜별로 렌더링하면서 완료 상태 확인
+        completed_count = 0
+        
         for idx, date_str in enumerate(sorted_dates):
             if idx < len(task_placeholders):
                 with task_placeholders[idx]:
                     TaskUI.render_single_day_tasks(date_str, grouped[date_str], backend_client)
+                
+                # 해당 날짜의 모든 task가 완료되었는지 확인
+                # for task in grouped[date_str]:
+                #     if not task.get("is_completed", False):
+                #         all_tasks_completed = False
+                
+                # 해당 날짜의 피드백이 있는지 확인
+                has_feedback = False
+                for feedback in st.session_state.feedback_list:
+                    if feedback.get("date") == date_str:
+                        has_feedback = True
+                        completed_count += 1
+                        break
+                if not has_feedback:
+                    all_feedbacks_completed = False
+
+        # 모든 학습과 피드백이 완료되었으면 주간 마무리 버튼 표시
+        all_learning_completed = all_tasks_completed and all_feedbacks_completed and len(sorted_dates) > 0
+        
+        with task_placeholders[len(sorted_dates)]:
+            if st.button(f"📚 학습 과정 마무리 : {completed_count}/{len(sorted_dates)}일 완료", key="weekly_summary_btn", type="primary", use_container_width=True, disabled=not all_learning_completed):
+                # 주간 학습 마무리 메시지 전송
+                start_date = sorted_dates[0]
+                end_date = sorted_dates[-1]
+                summary_message = f"{start_date}부터 {end_date}까지의 학습을 모두 마쳤습니다. 이번 주 학습 내용을 종합하여 정리하고, 성찰록을 종합해주세요."
+                
+                st.session_state.pending_message = summary_message
+                st.rerun()
+        
+        if all_learning_completed:
+            st.toast("모든 학습을 완료했습니다! 학습 과정 마무리를 진행해주세요.", icon="🎉")
+                    
+                    
+        # else:
+        #     with task_placeholders[len(sorted_dates)]:
+        #         st.info(f"학습 마무리까지 남은 일수: {len(sorted_dates) - completed_count}일")
 
     @staticmethod
     def render_single_day_tasks(date_str, tasks_list, backend_client):
         df_data = []
         for task in tasks_list:
             page_range = f"{task.get('start_pg', '')}-{task.get('end_pg', '')}"
+            
+            # 썸네일 URL 생성 (첫 페이지)
+            start_pg = task.get('start_pg', 1)
+            thumbnail_url = f"{backend_client.backend_url}/data/textbook/{st.session_state.session_id}/thumbnail/{start_pg}"
+            
             df_data.append({
                 "No": task.get("task_no", ""),
                 "페이지범위": page_range,
-                "제목": task.get("title", ""),
+                "미리보기": thumbnail_url,
+                #"제목": task.get("title", ""),
                 "요약": task.get("summary", ""),
                 "완료여부": task.get("is_completed", False),
                 "date": task.get("date", ""),  # hidden
@@ -393,9 +448,14 @@ class TaskUI:
 
             column_config = {
                 "No": st.column_config.NumberColumn("No", width="small"),
-                "페이지": st.column_config.TextColumn("페이지범위", width="small"),
-                "제목": st.column_config.TextColumn("제목"),
-                "요약": st.column_config.TextColumn("요약"),
+                "페이지범위": st.column_config.TextColumn("페이지", width="small"),
+                "미리보기": st.column_config.ImageColumn(
+                    "미리보기", 
+                    width="small",
+                    help="교재 페이지 미리보기"
+                ),
+                #"제목": st.column_config.TextColumn("제목", width="medium"),
+                "요약": st.column_config.TextColumn("요약", width="large"),
                 "완료여부": st.column_config.CheckboxColumn("완료", width="small"),
                 "date": None,
                 "task_no": None,
@@ -405,9 +465,10 @@ class TaskUI:
                 df,
                 column_config=column_config,
                 use_container_width=True,
+                row_height=150,
                 hide_index=True,
                 key=f"task_editor_{date_str}_{hash(str(df_data))}",
-                disabled=["No", "페이지범위", "제목", "요약", "date", "task_no"],
+                disabled=["No", "페이지범위", "미리보기", "요약", "date", "task_no"],
             )
 
             if not edited_df.equals(df):
@@ -432,6 +493,33 @@ class TaskUI:
                 # 변경사항이 있으면 UI 업데이트를 위해 rerun
                 if has_changes:
                     st.rerun()
+            
+            # 해당 날짜의 피드백 찾기
+            existing_feedback = None
+            for feedback in st.session_state.feedback_list:
+                if feedback.get("date") == date_str:
+                    existing_feedback = feedback.get("feedback", "")
+                    break
+            
+            # 학습 완료 버튼 (피드백이 없을 때만 표시)
+            if not existing_feedback:
+                if st.button(f"📝 {date_str} 학습 완료", key=f"complete_btn_{date_str}", type="secondary", use_container_width=True):
+                    # 완료된 task 수 계산
+                    completed_tasks = sum(1 for task in tasks_list if task.get("is_completed", False))
+                    total_tasks = len(tasks_list)
+                    
+                    # 백엔드로 학습 완료 메시지 전송
+                    completion_message = f"{date_str}의 학습을 마쳤습니다. {completed_tasks}/{total_tasks} 할 일을 완료했습니다."
+                    
+                    # 채팅 입력으로 메시지 전송 시뮬레이션
+                    st.session_state.pending_message = completion_message
+                    st.rerun()
+            
+            # 성찰 피드백 표시
+            if existing_feedback:
+                st.success(f"📝 {date_str} 학습 완료")
+                st.write("📖 **나의 한 줄 성찰록**")
+                st.write(existing_feedback)
 
     @staticmethod
     def update_task_status(date, task_no, completed, backend_client):
@@ -472,6 +560,8 @@ class MessageRenderer:
             return "교재 내용 조회"
         elif tool_name == "update_task_list":
             return "할 일 목록 업데이트"
+        elif tool_name == "update_feedback_list":
+            return "성찰록 업데이트"
         return tool_name
     
     def render_message(self, message, viewport_height):
@@ -526,6 +616,9 @@ class MessageRenderer:
                 elif item_type == "task_update":
                     self._handle_task_update(item_content)
                     
+                elif item_type == "feedback_update":
+                    self._handle_feedback_update(item_content)
+                    
                 elif item_type == "tool":
                     if current_idx < len(placeholders):
                         self._render_tool_item(item, placeholders, current_idx)
@@ -571,6 +664,23 @@ class MessageRenderer:
 
         except Exception as e:
             self.logger.error(f"Task update error: {e}")
+    
+    def _handle_feedback_update(self, feedback_data):
+        """Handle feedback list updates from backend"""
+        try:
+            if isinstance(feedback_data, str):
+                feedback_data = json.loads(feedback_data)
+
+            # feedback_data는 전체 feedback 배열 (List[dict])
+            # 메시지 렌더링 중에는 바로 rerun하지 않고 상태만 업데이트
+            if st.session_state.get("feedback_list") != feedback_data:
+                st.session_state.feedback_list = feedback_data
+                # 스트리밍 중이 아닐 때만 즉시 rerun
+                if not st.session_state.get("is_streaming", False):
+                    st.rerun()
+
+        except Exception as e:
+            self.logger.error(f"Feedback update error: {e}")
 
 # Backend Communication (기존과 유사)
 class BackendClient:
@@ -688,6 +798,21 @@ class BackendClient:
                             text_placeholder = None
 
                         self._handle_task_update_from_stream(text)
+                    
+                    # ---------------- Feedback update ----------------
+                    elif msg_type == "feedback_update":
+                        # flush buffer before handling
+                        if text_buffer:
+                            if text_placeholder is None:
+                                text_placeholder = placeholders[current_idx].empty()
+                            text_placeholder.markdown(text_buffer)
+                            message_data["messages"].append({"type": "text", "content": text_buffer})
+                            logger.info(f"session_id: {st.session_state.session_id}, assistant response: \n{text_buffer}")
+                            current_idx += 1
+                            text_buffer = ""
+                            text_placeholder = None
+
+                        self._handle_feedback_update_from_stream(text)
 
                     # ---------------- Tool message ----------------
                     elif msg_type == "tool":
@@ -733,6 +858,8 @@ class BackendClient:
             return "교재 내용 조회"
         elif tool_name == "update_task_list":
             return "Task 목록 업데이트"
+        elif tool_name == "update_feedback_list":
+            return "성찰록 업데이트"
         return tool_name
     
     def _handle_task_update_from_stream(self, task_data):
@@ -750,6 +877,22 @@ class BackendClient:
             
         except Exception as e:
             self.logger.error(f"Task update from stream error: {e}")
+    
+    def _handle_feedback_update_from_stream(self, feedback_data):
+        """Handle feedback updates from streaming response"""
+        try:
+            if isinstance(feedback_data, str):
+                feedback_data = json.loads(feedback_data)
+            
+            # 스트리밍 중에는 rerun을 호출하지 않고 상태만 업데이트
+            # rerun은 스트리밍이 완료된 후에 수행
+            if st.session_state.get("feedback_list") != feedback_data:
+                st.session_state.feedback_list = feedback_data
+                # 스트리밍 완료 후 rerun이 필요함을 표시
+                st.session_state.needs_rerun_after_stream = True
+            
+        except Exception as e:
+            self.logger.error(f"Feedback update from stream error: {e}")
     
     def _handle_request_error(self, error, placeholders, idx):
         """Handle request errors"""
@@ -811,6 +954,11 @@ def show_main_app(config, logger):
         on_submit=on_submit
     )
     
+    # pending_message 처리 (학습 완료 버튼에서 온 메시지)
+    if st.session_state.get("pending_message"):
+        prompt = st.session_state.pending_message
+        st.session_state.pending_message = None  # 메시지 처리 후 삭제
+        
     # Process prompt
     if prompt:
         st.session_state.is_streaming = True
