@@ -17,7 +17,7 @@ class Config:
         self.page_title = "MyStudy"
         self.page_icon = "📚"
         self.layout = "wide"
-        self.sidebar_state = "collapsed"
+        self.sidebar_state = "expanded"
         self.version = "0.1.0"
         self.author = "11조 권준희, 이채민, 김세민"
         
@@ -318,13 +318,20 @@ class UI:
                 with st.container(border=True, height=viewport_height): 
                     pad1, main_container, pad2 = st.columns([1, 5, 1])
                     with main_container:
-                        st.title("📚 MyStudy")
-                        st.write(" *AI 학습 코치 시스템*")
-                        st.info("설정에서 교재를 먼저 업로드하세요.", icon="💡")
-                        st.markdown("**오른쪽 채팅창에서 다음과 같이 요청해보세요:**")
-                        st.markdown("- '교재 1단원부터 3단원까지 1주일 공부 계획 짜줘'")
-                        st.markdown("- '오늘부터 5일동안 매일 20페이지씩 공부 계획 만들어줘'")
-                        st.markdown("- '현재 진도 상황 알려줘'") 
+                        st.title("📖 MyStudy")
+                        st.write(" *자기주도학습을 위한 AI 학습 코치 시스템*")
+                        st.info("왼쪽의 설정 메뉴에서 PDF 교재를 먼저 업로드하세요.", icon="💡")
+                        st.markdown("**아래 채팅창에서 다음과 같이 요청해보세요:**")
+                        st.markdown(" :white_check_mark: '교재 1단원부터 3단원까지 1주일 공부 계획 짜줘'")
+                        st.markdown(" :white_check_mark: '오늘부터 5일동안 매일 20페이지씩 공부 계획 만들어줘'")
+                        st.markdown(" :white_check_mark: '현재 진도 상황 알려줘'") 
+                        st.divider()
+                        st.markdown("**Github repo**")
+                        st.markdown("""
+| Repository | URL |
+|------------|-----|
+| frontend | [:red-background[바로가기]](https://github.com/wnsgml9807/25_AIED_11_frontend.git) |
+| backend | [:blue-background[바로가기]](https://github.com/wnsgml9807/25_AIED_11_backend.git) |""")
                 task_placeholders = []
             else:
                 # 실제 task list 표시용 컨테이너
